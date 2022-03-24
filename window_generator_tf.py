@@ -71,7 +71,7 @@ class WindowGenerator():
         self.label_indices = np.arange(self.total_window_size)[self.labels_slice]
 
     def split_window(self, features):
-        indices = tf.expand_dims(features[:, :, -1], -1)
+        indices = features[:, :, -1]
         features = features[:, :, :-1]
         inputs = features[:, self.input_slice, :]
         labels = features[:, self.labels_slice, :]
@@ -91,7 +91,7 @@ class WindowGenerator():
         # # manually. This way the `tf.data.Datasets` are easier to inspect.
         inputs.set_shape([None, self.input_width, len(self.input_columns if self.input_columns else self.columns)])
         labels.set_shape([None, self.label_width, len(self.label_columns if self.label_columns else self.columns)])
-        indices.set_shape([None, self.total_window_size, 1])
+        indices.set_shape([None, self.total_window_size])
 
         return inputs, indices, labels
     
@@ -123,39 +123,33 @@ class WindowGenerator():
 
     def plot(self, model, plot_col='packetLossRate', max_subplots=3):
         inputs, indices, labels = next(iter(self.test().take(1)))
-        indices = tf.squeeze(indices, axis=-1)
+        indices = indices.numpy().astype('int32')
         
-        plt.figure(figsize=(12, 8))
+        plt.figure(figsize=(16, 8))
         plot_col_index = self.column_indices[plot_col]
         input_col_index = self.input_columns_indices.get(plot_col, None) if self.input_columns else plot_col_index
-        assert input_col_index is not None
+        label_col_index = self.label_columns_indices.get(plot_col, None) if self.label_columns else plot_col_index
+        assert input_col_index is not None and label_col_index is not None
         max_n = min(max_subplots, len(inputs))
 
         name = None
+        interval = 5
         for n in range(max_n):
             plt.subplot(max_n, 1, n+1)
             plt.ylabel(plot_col)
-            sub_indices = indices[n, ::5]
+            sub_indices = indices[n, ::interval]
             if n == 0:
-                name = self.test_time[sub_indices][0].strftime("%Y-%m-%d %H:%M")
-            sub_times = [x.strftime("%S.%f")[:-4] for x in self.test_time[sub_indices]]
-            sub_ticks = np.arange(self.total_window_size)[::5]
+                name = self.test_time[sub_indices][0].strftime("%Y-%m-%d %H:%M:%S")
+            sub_times = [x.strftime("%M:%S.%f")[:-4] for x in self.test_time[sub_indices]]
+            sub_ticks = np.arange(self.total_window_size)[::interval]
             plt.xticks(sub_ticks, sub_times)
             values = inputs[n, :, input_col_index] * self.train_std[plot_col] + self.train_mean[plot_col]
             plt.plot(self.input_indices, values,
                     label='Inputs', marker='.', zorder=-10)
 
-            if self.label_columns:
-                label_col_index = self.label_columns_indices.get(plot_col, None)
-            else:
-                label_col_index = plot_col_index
-
-            if label_col_index is None:
-                continue
-
             values = labels[n, :, label_col_index] * self.train_std[plot_col] + self.train_mean[plot_col]
-            plt.scatter(self.label_indices, values,
-                        edgecolors='k', label='Labels', c='#2ca02c', s=64)
+            plt.plot(self.label_indices, values,
+                     label='Labels', c='#2ca02c')
             if model is not None:
                 predictions = model(inputs)
                 values = predictions[n, :, label_col_index] * self.train_std[plot_col] + self.train_mean[plot_col]
@@ -166,7 +160,46 @@ class WindowGenerator():
             if n == 0:
                 plt.legend()
 
-        plt.xlabel('Time ' + name + ' [ms]')
+        plt.xlabel('Time ' + name + ' [s]')
+
+    def plot_y(self, model, plot_col='packetLossRate', max_subplots=3):
+        
+        plt.figure(figsize=(12, 8))
+        plot_col_index = self.column_indices[plot_col]
+        input_col_index = self.input_columns_indices.get(plot_col, None) if self.input_columns else plot_col_index
+        label_col_index = self.label_columns_indices.get(plot_col, None) if self.label_columns else plot_col_index
+        assert input_col_index is not None and label_col_index is not None
+
+        batch_size = None
+        name = None
+        n = 0
+        interval = 5
+        for inputs, indices, labels in self.test().take(max_subplots):
+            batch_size = inputs.shape[0]
+            plt.subplot(max_subplots, 1, n+1)
+            plt.ylabel(plot_col)
+            sub_indices = tf.squeeze(indices[:, -self.label_width]).numpy().astype('int32')[::interval]
+            if n == 0:
+                name = self.test_time[sub_indices][sub_indices[0]].strftime("%Y-%m-%d %H:%M:%S")
+            sub_times = [x.strftime("%M:%S.%f")[:-4] for x in self.test_time[sub_indices]]
+            sub_ticks = np.arange(batch_size)[::interval]
+            plt.xticks(sub_ticks, sub_times)
+
+            values = labels[:, -self.label_width, label_col_index] * self.train_std[plot_col] + self.train_mean[plot_col]
+            plt.plot(np.arange(batch_size), values,
+                        label='Inputs', marker='.', zorder=-10)
+            if model is not None:
+                predictions = model(inputs)
+                values = predictions[:, -self.label_width, label_col_index] * self.train_std[plot_col] + self.train_mean[plot_col]
+                plt.scatter(np.arange(batch_size), values,
+                            marker='X', edgecolors='k', label='Predictions',
+                            c='#ff7f0e', s=64)
+
+            if n == 0:
+                plt.legend()
+            n += 1
+
+        plt.xlabel('Time ' + name + ' [s]')
 
     def __repr__(self):
         return '\n'.join([
