@@ -25,7 +25,7 @@ class WindowGenerator():
             label_columns (Optional[List[str]], optional): Output column names. Defaults to None.
             timestamp_column (str, optional): Name of the timestamp column. Defaults to 'timestamp'.
         """
-        
+
         self.train_time = train_df.pop(timestamp_column)
         self.val_time = val_df.pop(timestamp_column)
         self.test_time = test_df.pop(timestamp_column)
@@ -39,11 +39,11 @@ class WindowGenerator():
 
         # Store the raw data
         self.train_df = train_df
-        self.train_index = np.arange(len(train_df)).reshape(-1, 1)
+        self.train_index = np.array(train_df.index).reshape(-1, 1)
         self.val_df = val_df
-        self.val_index = np.arange(len(val_df)).reshape(-1, 1)
+        self.val_index = np.array(val_df.index).reshape(-1, 1)
         self.test_df = test_df
-        self.test_index = np.arange(len(test_df)).reshape(-1, 1)
+        self.test_index = np.array(test_df.index).reshape(-1, 1)
 
         # Work out the label column indices.
         self.input_columns = input_columns
@@ -61,7 +61,9 @@ class WindowGenerator():
         self.label_width = label_width
         self.offset = offset
 
-        self.total_window_size = input_width + offset
+        self.total_window_size = input_width + offset + label_width
+        assert self.total_window_size > input_width
+        assert self.total_window_size > label_width
 
         self.input_slice = slice(0, input_width)
         self.input_indices = np.arange(self.total_window_size)[self.input_slice]
@@ -112,17 +114,26 @@ class WindowGenerator():
 
         return ds
 
-    def train(self, batch=32):
-        return self.make_dataset(self.train_df, self.train_index, batch)
+    def train(self, batch=32, indices=False):
+        data = self.make_dataset(self.train_df, self.train_index, batch)
+        if not indices:
+            data = data.map(lambda x,y,z: (x, z))
+        return data
 
-    def val(self, batch=32):
-        return self.make_dataset(self.val_df, self.val_index, batch)
+    def val(self, batch=32, indices=False):
+        data = self.make_dataset(self.val_df, self.val_index, batch)
+        if not indices:
+            data = data.map(lambda x,y,z: (x, z))
+        return data
 
-    def test(self, batch=32):
-        return self.make_dataset(self.test_df, self.test_index, batch, False)
+    def test(self, batch=32, indices=False):
+        data = self.make_dataset(self.test_df, self.test_index, batch, False)
+        if not indices:
+            data = data.map(lambda x,y,z: (x, z))
+        return data
 
     def plot(self, model, plot_col='packetLossRate', max_subplots=3):
-        inputs, indices, labels = next(iter(self.test().take(1)))
+        inputs, indices, labels = next(iter(self.test(indices=True).take(1)))
         indices = indices.numpy().astype('int32')
         
         plt.figure(figsize=(16, 8))
@@ -139,7 +150,7 @@ class WindowGenerator():
             plt.ylabel(plot_col)
             sub_indices = indices[n, ::interval]
             if n == 0:
-                name = self.test_time[sub_indices][0].strftime("%Y-%m-%d %H:%M:%S")
+                name = self.test_time[sub_indices][sub_indices[0]].strftime("%Y-%m-%d %H:%M:%S")
             sub_times = [x.strftime("%M:%S.%f")[:-4] for x in self.test_time[sub_indices]]
             sub_ticks = np.arange(self.total_window_size)[::interval]
             plt.xticks(sub_ticks, sub_times)
@@ -162,7 +173,7 @@ class WindowGenerator():
 
         plt.xlabel('Time ' + name + ' [s]')
 
-    def plot_y(self, model, plot_col='packetLossRate', max_subplots=3):
+    def plot_y(self, model, plot_col='packetLossRate', max_subplots=3, width=50):
         
         plt.figure(figsize=(12, 8))
         plot_col_index = self.column_indices[plot_col]
@@ -174,7 +185,7 @@ class WindowGenerator():
         name = None
         n = 0
         interval = 5
-        for inputs, indices, labels in self.test().take(max_subplots):
+        for inputs, indices, labels in self.test(batch=width, indices=True).take(max_subplots):
             batch_size = inputs.shape[0]
             plt.subplot(max_subplots, 1, n+1)
             plt.ylabel(plot_col)
