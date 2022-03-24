@@ -138,7 +138,7 @@ class WindowGenerator():
             sub_indices = indices[n, ::5]
             if n == 0:
                 name = self.test_time[sub_indices][0].strftime("%Y-%m-%d %H:%M")
-            sub_times = [x.strftime("%S") for x in self.test_time[sub_indices]]
+            sub_times = [x.strftime("%S.%f")[:-4] for x in self.test_time[sub_indices]]
             sub_ticks = np.arange(self.total_window_size)[::5]
             plt.xticks(sub_ticks, sub_times)
             values = inputs[n, :, input_col_index] * self.train_std[plot_col] + self.train_mean[plot_col]
@@ -166,7 +166,7 @@ class WindowGenerator():
             if n == 0:
                 plt.legend()
 
-        plt.xlabel('Time ' + name + ' [s]')
+        plt.xlabel('Time ' + name + ' [ms]')
 
     def __repr__(self):
         return '\n'.join([
